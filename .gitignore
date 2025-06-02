@@ -1,0 +1,49 @@
+# ---- Python / FastAPI ----
+venv/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.db
+*.sqlite3
+instance/
+.env
+.env.*
+
+# ---- VS Code / PyCharm ----
+.vscode/
+.idea/
+
+# ---- Logs / Cache ----
+*.log
+*.pot
+*.pyc
+*.pkl
+.DS_Store
+.cache/
+*.egg-info/
+.eggs/
+*.bak
+
+# ---- Node / React ----
+frontend/node_modules/
+frontend/.next/
+frontend/.env
+frontend/build/
+frontend/dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ---- Testing / Coverage ----
+htmlcov/
+.tox/
+.coverage
+coverage.xml
+pytest_cache/
+
+# ---- System ----
+Thumbs.db
+ehthumbs.db
+Icon?
+desktop.ini
