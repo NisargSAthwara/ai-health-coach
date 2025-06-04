@@ -1,42 +1,85 @@
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Activity, Target, Droplet, Clock, TrendingUp } from 'lucide-react';
 
+interface SummaryData {
+  date: string;
+  metrics: {
+    total_steps: number;
+    avg_sleep_hours: number;
+    avg_water_intake: number;
+    total_calories_consumed: number;
+  };
+  goal_progress: {
+    calories?: { current: number; target: number; progress: number };
+    water?: { current: number; target: number; progress: number };
+    sleep?: { current: number; target: number; progress: number };
+    steps?: { current: number; target: number; progress: number };
+  };
+  daily_tip: string;
+}
+
 const HealthDashboard = () => {
-  const healthMetrics = [
+  const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchSummary = async () => {
+      try {
+        // For now, using a hardcoded user_id. This should ideally come from authentication.
+        const userId = "test_user"; 
+        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/summary?user_id=${userId}`);
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const data: SummaryData = await response.json();
+        setSummaryData(data);
+      } catch (err) {
+        console.error("Error fetching summary data:", err);
+        setError("Failed to load health summary.");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchSummary();
+  }, []);
+
+  const healthMetrics = summaryData ? [
     {
       label: 'Steps Today',
-      value: '8,247',
-      target: '10,000',
+      value: summaryData.metrics.total_steps.toLocaleString(),
+      target: summaryData.goal_progress.steps?.target.toLocaleString() || 'N/A',
       icon: Activity,
       color: 'emerald',
-      progress: 82
+      progress: summaryData.goal_progress.steps?.progress || 0
     },
     {
       label: 'Water Intake',
-      value: '6',
-      target: '8 glasses',
+      value: summaryData.metrics.avg_water_intake.toLocaleString(),
+      target: `${summaryData.goal_progress.water?.target || 'N/A'} glasses`,
       icon: Droplet,
       color: 'blue',
-      progress: 75
+      progress: summaryData.goal_progress.water?.progress || 0
     },
     {
       label: 'Sleep',
-      value: '7.5h',
-      target: '8h',
+      value: `${summaryData.metrics.avg_sleep_hours}h`,
+      target: `${summaryData.goal_progress.sleep?.target || 'N/A'}h`,
       icon: Clock,
       color: 'purple',
-      progress: 94
+      progress: summaryData.goal_progress.sleep?.progress || 0
     },
     {
-      label: 'Goals Met',
-      value: '3',
-      target: '5 daily',
+      label: 'Calories Consumed',
+      value: summaryData.metrics.total_calories_consumed.toLocaleString(),
+      target: `${summaryData.goal_progress.calories?.target || 'N/A'} kcal`,
       icon: Target,
       color: 'orange',
-      progress: 60
+      progress: summaryData.goal_progress.calories?.progress || 0
     }
-  ];
+  ] : [];
 
   const getColorClasses = (color: string) => {
     const colors = {
@@ -58,6 +101,14 @@ const HealthDashboard = () => {
     return colors[color as keyof typeof colors] || colors.emerald;
   };
 
+  if (isLoading) {
+    return <div className="text-center text-gray-500">Loading health summary...</div>;
+  }
+
+  if (error) {
+    return <div className="text-center text-red-500">Error: {error}</div>;
+  }
+
   return (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
       <div className="flex items-center justify-between mb-6">
@@ -74,6 +125,7 @@ const HealthDashboard = () => {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {healthMetrics.map((metric, index) => {
           const Icon = metric.icon;
+          const progressPercentage = Math.max(0, Math.min(100, metric.progress)); // Ensure progress is between 0 and 100
           return (
             <div
               key={index}
@@ -84,7 +136,7 @@ const HealthDashboard = () => {
                 <div className={`p-2 rounded-lg ${getIconColor(metric.color)}`}>
                   <Icon className="h-5 w-5" />
                 </div>
-                <span className="text-xs text-gray-500 font-medium">{metric.progress}%</span>
+                <span className="text-xs text-gray-500 font-medium">{Math.round(progressPercentage)}%</span>
               </div>
               
               <div className="space-y-2">
@@ -97,7 +149,7 @@ const HealthDashboard = () => {
                 <div className="w-full bg-gray-200 rounded-full h-2">
                   <div
                     className={`h-2 rounded-full transition-all duration-500 ${getColorClasses(metric.color)}`}
-                    style={{ width: `${metric.progress}%` }}
+                    style={{ width: `${progressPercentage}%` }}
                   ></div>
                 </div>
               </div>
@@ -106,13 +158,14 @@ const HealthDashboard = () => {
         })}
       </div>
 
-      <div className="mt-6 p-4 bg-gradient-to-r from-emerald-50 to-teal-50 rounded-lg border border-emerald-200">
-        <h3 className="font-semibold text-emerald-900 mb-2">Today's Tip</h3>
-        <p className="text-sm text-emerald-700">
-          You're doing great! Try to drink 2 more glasses of water to reach your hydration goal. 
-          Small consistent steps lead to big health improvements.
-        </p>
-      </div>
+      {summaryData?.daily_tip && (
+        <div className="mt-6 p-4 bg-gradient-to-r from-emerald-50 to-teal-50 rounded-lg border border-emerald-200">
+          <h3 className="font-semibold text-emerald-900 mb-2">Today's Tip</h3>
+          <p className="text-sm text-emerald-700">
+            {summaryData.daily_tip}
+          </p>
+        </div>
+      )}
     </div>
   );
 };
