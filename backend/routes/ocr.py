@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from backend.data.db import get_db
 from ..services.db_service import add_food_log
+from models.db_models import OCRLog
 
 router = APIRouter()
 

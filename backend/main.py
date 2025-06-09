@@ -1,6 +1,6 @@
 from fastapi import FastAPI
-from .routes import chat
-from .routes import goal, log, ocr, summary
+from backend.routes import chat, auth
+from backend.routes import goal, log, ocr, summary
 from backend.data.db import Base, engine
 from backend.data.init_db import init_tables
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,7 +18,6 @@ app = FastAPI(
 # CORS Middleware
 app.add_middleware(
     CORSMiddleware,
-    # allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:8080"],
     allow_origins=["http://localhost:8080"],
     allow_credentials=True,
     allow_methods=["*"],
@@ -27,11 +26,13 @@ app.add_middleware(
 
 app.add_middleware(GoalContextMiddleware)
 
+app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(chat.router, prefix="/api/v1")
 app.include_router(goal.router, prefix="/api/v1")
 app.include_router(log.router, prefix="/api/v1")
 app.include_router(ocr.router, prefix="/api/v1")
 app.include_router(summary.router, prefix="/api/v1")
+
 
 @app.get("/health", tags=["System"])
 async def health_check():
@@ -47,3 +48,6 @@ if __name__ == "__main__":
     
     print("Starting AI Health Assistant server...")
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+import logging
+logging.basicConfig(level=logging.DEBUG)

@@ -1,10 +1,16 @@
 
 import React, { useState } from 'react';
-import { Activity, User } from 'lucide-react';
+import { Activity, User, LogOut } from 'lucide-react';
 import LoginModal from './LoginModal';
+import { useAuth } from '../context/AuthContext';
 
 const Header = () => {
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+  const { isAuthenticated, logout } = useAuth();
+
+  const handleLogout = () => {
+    logout();
+  };
 
   return (
     <>
@@ -22,13 +28,23 @@ const Header = () => {
             </div>
             
             <div className="flex items-center space-x-4">
-              <button 
-                onClick={() => setIsLoginModalOpen(true)}
-                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-emerald-700 bg-emerald-100 hover:bg-emerald-200 transition-colors duration-200"
-              >
-                <User className="h-4 w-4 mr-2" />
-                Login
-              </button>
+              {isAuthenticated ? (
+                <button 
+                  onClick={handleLogout}
+                  className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-red-700 bg-red-100 hover:bg-red-200 transition-colors duration-200"
+                >
+                  <LogOut className="h-4 w-4 mr-2" />
+                  Logout
+                </button>
+              ) : (
+                <button 
+                  onClick={() => setIsLoginModalOpen(true)}
+                  className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-emerald-700 bg-emerald-100 hover:bg-emerald-200 transition-colors duration-200"
+                >
+                  <User className="h-4 w-4 mr-2" />
+                  Login
+                </button>
+              )}
             </div>
           </div>
         </div>

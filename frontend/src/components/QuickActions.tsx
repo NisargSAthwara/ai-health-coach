@@ -7,11 +7,13 @@ import WeightLogger from './calculators/WeightLogger';
 import NutritionGuide from './calculators/NutritionGuide';
 import FoodSearch from './calculators/FoodSearch';
 import AddEntry from './calculators/AddEntry';
+import { useAuth } from '../context/AuthContext';
 
 type ActiveTool = 'bmi' | 'weight' | 'bmr' | 'nutrition' | 'food' | 'entry' | null;
 
 const QuickActions = () => {
   const [activeTool, setActiveTool] = useState<ActiveTool>(null);
+  const { isAuthenticated } = useAuth();
 
   const actions = [
     {
@@ -54,7 +56,8 @@ const QuickActions = () => {
       label: 'Add Entry',
       description: 'Log your activities',
       icon: PlusCircle,
-      color: 'indigo'
+      color: 'indigo',
+      requiresAuth: false,
     }
   ];
 
@@ -111,8 +114,9 @@ const QuickActions = () => {
             <button
               key={action.id}
               onClick={() => setActiveTool(action.id)}
-              className={`p-4 rounded-lg border text-left transition-all duration-200 hover:shadow-md hover:scale-105 animate-fade-in ${getColorClasses(action.color)}`}
+              className={`p-4 rounded-lg border text-left transition-all duration-200 hover:shadow-md hover:scale-105 animate-fade-in ${getColorClasses(action.color)} ${action.requiresAuth && !isAuthenticated ? 'opacity-50 cursor-not-allowed' : ''}`}
               style={{ animationDelay: `${index * 100}ms` }}
+              disabled={action.requiresAuth && !isAuthenticated}
             >
               <div className="flex flex-col items-center space-y-3">
                 <Icon className="h-8 w-8" />

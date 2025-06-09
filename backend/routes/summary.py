@@ -1,19 +1,21 @@
-from fastapi import APIRouter, Depends, HTTPException 
+from fastapi import APIRouter, Depends
 from typing import Optional
 from sqlalchemy.orm import Session
 from backend.data.db import get_db
-from ..services.db_service import get_logs_by_date_range, get_food_entries_by_date_range, get_goal_by_id
+from backend.services.db_service import get_logs_by_date_range, get_food_entries_by_date_range, get_goal_by_user_id
+from backend.dependencies import get_current_user
+from models.db_models import User
 from datetime import datetime, timedelta
 
 router = APIRouter()
 
 @router.get("/summary")
-def get_summary(user_id: str, db: Session = Depends(get_db), goal_id: Optional[int] = None):
+def get_summary(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):    
     end_date = datetime.now()
     start_date = end_date - timedelta(days=1) # Daily summary
     
-    logs = get_logs_by_date_range(db, user_id, start_date, end_date)
-    food_entries = get_food_entries_by_date_range(db, user_id, start_date, end_date)
+    logs = get_logs_by_date_range(db, current_user.id, start_date, end_date)
+    food_entries = get_food_entries_by_date_range(db, current_user.id, start_date, end_date)
     
     total_steps = sum([log.steps for log in logs]) if logs else 0
     avg_sleep_hours = sum([log.sleep_hours for log in logs]) / len(logs) if logs else 0
@@ -26,8 +28,8 @@ def get_summary(user_id: str, db: Session = Depends(get_db), goal_id: Optional[i
     goal_progress = {}
     daily_tip = "Keep up the great work! Consistency is key to achieving your health goals."
 
-    if goal_id:
-        goal = get_goal_by_id(db, goal_id)
+    goal = get_goal_by_user_id(db, current_user.id)
+    if goal and goal.analysis_result:
         if goal and goal.analysis_result:
             analysis = goal.analysis_result
             target_calories = analysis.get("target_calories", 0)

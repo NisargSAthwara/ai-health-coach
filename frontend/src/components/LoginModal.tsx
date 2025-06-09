@@ -1,6 +1,7 @@
 
 import React, { useState } from 'react';
 import { X, User, Mail, Lock, Eye, EyeOff } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -14,21 +15,54 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
   const [name, setName] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const { login } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    
-    // Simulate API call
-    setTimeout(() => {
-      setIsLoading(false);
-      alert(isLogin ? 'Login successful!' : 'Account created successfully!');
+    setErrorMessage(null); // Clear previous errors
+
+    const url = isLogin ? `${import.meta.env.VITE_API_BASE_URL}/auth/login` : `${import.meta.env.VITE_API_BASE_URL}/auth/signup`;
+    const body = isLogin 
+      ? `username=${encodeURIComponent(email)}&password=${encodeURIComponent(password)}`
+      : JSON.stringify({ email, password, name });
+
+    const headers = isLogin 
+      ? { 'Content-Type': 'application/x-www-form-urlencoded' }
+      : { 'Content-Type': 'application/json' };
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: headers,
+        body: body,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Authentication failed');
+      }
+
+      const data = await response.json();
+      const user = {
+        id: data.user_id,
+        name: data.name,
+        email: email,
+      };
+      login(data.access_token, user);
       onClose();
       // Reset form
       setEmail('');
       setPassword('');
       setName('');
-    }, 1500);
+    } catch (error: any) {
+      setErrorMessage(error.message);
+      console.error('Authentication error:', error);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   if (!isOpen) return null;
@@ -56,7 +90,7 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
           {!isLogin && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Full Name
+                Name
               </label>
               <div className="relative">
                 <User className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
@@ -65,7 +99,7 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-                  placeholder="Enter your full name"
+                  placeholder="Enter your name"
                   required={!isLogin}
                 />
               </div>
@@ -87,9 +121,9 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
                 required
               />
             </div>
-          </div>
+           </div>
 
-          <div>
+           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Password
             </label>
@@ -113,6 +147,10 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
             </div>
           </div>
 
+          {errorMessage && (
+            <p className="text-red-500 text-sm text-center">{errorMessage}</p>
+          )}
+
           <button
             type="submit"
             disabled={isLoading}
@@ -126,7 +164,10 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
           <p className="text-gray-600">
             {isLogin ? "Don't have an account?" : 'Already have an account?'}
             <button
-              onClick={() => setIsLogin(!isLogin)}
+              onClick={() => {
+                setIsLogin(!isLogin);
+                setErrorMessage(null); // Clear error when switching forms
+              }}
               className="ml-2 text-emerald-600 hover:text-emerald-700 font-medium"
             >
               {isLogin ? 'Sign up' : 'Sign in'}

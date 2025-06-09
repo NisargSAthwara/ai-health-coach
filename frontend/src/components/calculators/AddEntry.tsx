@@ -1,6 +1,7 @@
 
 import React, { useState } from 'react';
 import { PlusCircle, ArrowLeft, Save } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 
 interface AddEntryProps {
   onBack: () => void;
@@ -20,6 +21,8 @@ const AddEntry: React.FC<AddEntryProps> = ({ onBack }) => {
   const [notes, setNotes] = useState('');
   const [isSubmitted, setIsSubmitted] = useState(false);
 
+  const { isAuthenticated } = useAuth();
+
   const entryTypes = [
     { id: 'exercise', label: 'Exercise', units: ['minutes', 'hours'] },
     { id: 'food', label: 'Food/Meal', units: ['servings', 'grams', 'cups'] },
@@ -33,6 +36,14 @@ const AddEntry: React.FC<AddEntryProps> = ({ onBack }) => {
 
   const handleSubmit = () => {
     if (entryType && value) {
+      if (!isAuthenticated) {
+        setIsSubmitted(true);
+        setTimeout(() => {
+          setIsSubmitted(false);
+        }, 2000);
+        return;
+      }
+
       const entry: Entry = {
         type: entryType,
         value,
@@ -75,8 +86,8 @@ const AddEntry: React.FC<AddEntryProps> = ({ onBack }) => {
           <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
             <Save className="h-8 w-8 text-green-600" />
           </div>
-          <h4 className="text-lg font-semibold text-green-900 mb-2">Entry Saved!</h4>
-          <p className="text-green-700">Your health data has been recorded successfully.</p>
+          <h4 className="text-lg font-semibold text-green-900 mb-2">{isAuthenticated ? "Entry Saved!" : "Please Log In"}</h4>
+      <p className="text-sm text-gray-600">{isAuthenticated ? "Your health data has been recorded successfully." : "Please log in to add the entry."}</p>
         </div>
       ) : (
         <div className="space-y-4">

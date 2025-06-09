@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Activity, Target, Droplet, Clock, TrendingUp } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 
 interface SummaryData {
   date: string;
@@ -23,13 +24,44 @@ const HealthDashboard = () => {
   const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { token, isAuthenticated } = useAuth();
 
   useEffect(() => {
     const fetchSummary = async () => {
+      if (!isAuthenticated || !token) {
+        // Provide mock data if not authenticated
+        setSummaryData({
+          date: new Date().toISOString().split('T')[0],
+          metrics: {
+            total_steps: 7500,
+            avg_sleep_hours: 7.5,
+            avg_water_intake: 2.0,
+            total_calories_consumed: 2000,
+          },
+          goal_progress: {
+            calories: { current: 2000, target: 2500, progress: 80 },
+            water: { current: 2.0, target: 3.0, progress: 66 },
+            sleep: { current: 7.5, target: 8.0, progress: 93 },
+            steps: { current: 7500, target: 10000, progress: 75 },
+          },
+          daily_tip: "Stay hydrated by drinking at least 8 glasses of water a day!",
+        });
+        setIsLoading(false);
+        setError(null); // Clear any previous errors
+        return;
+      }
+
       try {
-        // For now, using a hardcoded user_id. This should ideally come from authentication.
-        const userId = "test_user"; 
-        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/summary?user_id=${userId}`);
+        // const token = localStorage.getItem("token");
+        console.log('Token:', token);
+        // const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/summary`, {
+          const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/summary`, {
+            method: "GET",
+            headers: {
+            'Authorization': `Bearer ${token}`,
+            "Content-Type": "application/json"
+          }
+        });
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -44,7 +76,7 @@ const HealthDashboard = () => {
     };
 
     fetchSummary();
-  }, []);
+  }, [token, isAuthenticated]);
 
   const healthMetrics = summaryData ? [
     {

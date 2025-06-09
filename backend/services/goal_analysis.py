@@ -1,5 +1,15 @@
 from backend.services.planner import run_assistant
 
+def calculate_bmi(weight_kg: float, height_cm: float) -> float:
+    height_m = height_cm / 100
+    return round(weight_kg / (height_m ** 2), 2)
+
+def calculate_bmr(weight_kg: float, height_cm: float, age: int, gender: str) -> float:
+    if gender.lower() == "male":
+       return round(10 * weight_kg + 6.25 * height_cm - 5 * age + 5, 2)
+    else:
+       return round(10 * weight_kg + 6.25 * height_cm - 5 * age - 161, 2)
+
 async def analyze_goal(goal_description: str):
     # This is a placeholder for actual goal analysis logic.
     # In a real scenario, you would use an LLM to parse the goal
@@ -28,3 +38,4 @@ async def analyze_goal(goal_description: str):
             "target_sleep_hours": 8,
             "target_steps": 10000
         }
+        

@@ -2,14 +2,26 @@ import asyncio
 
 from fastapi import APIRouter, HTTPException, Depends ,Request
 from pydantic import BaseModel
+import asyncio
+
+from fastapi import APIRouter, HTTPException, Depends ,Request
+from pydantic import BaseModel
 from typing import List, Tuple, Optional
 from fastapi.responses import StreamingResponse
 
+def contains_health_keywords(message: str) -> bool:
+    health_keywords = ["diet", "bmi", "bmr", "nutrition", "weight loss", "gain weight", "calories", "health", "exercise", "workout"]
+    message_lower = message.lower()
+    return any(keyword in message_lower for keyword in health_keywords)
+
 from backend.services.planner import run_assistant, AgentState, run_qa_assistant # Assuming run_assistant can be adapted for streaming
 from langchain_core.messages import HumanMessage, AIMessage
-from backend.services.db_service import get_goal_by_id
+from ..services import db_service
 from sqlalchemy.orm import Session
 from backend.data.db import get_db
+from backend.dependencies import get_current_user
+from models.db_models import User
+from datetime import datetime, timedelta
 
 router = APIRouter()
 
@@ -28,13 +40,28 @@ class ChatMessageOutput(BaseModel):
 # WARNING: This is not suitable for production. Use a proper database or cache.
 chat_histories = {}
 
-def get_current_goal(request: Request, db: Session = Depends(get_db)):
-    goal_id = request.state.goal_id
-    if goal_id:
-        return get_goal_by_id(db, goal_id)
-    return None
+async def get_user_context(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    user_id = current_user.id
+    user_profile = db_service.get_user_profile(db, user_id)
+    current_goal = db_service.get_goal_by_user_id(db, user_id)
+    
+    # Get recent logs and food entries for the last 30 days
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=30)
 
-async def stream_response_generator(user_input: str, session_id: str, history_tuples: List[Tuple[str,str]], current_goal: Optional[dict] = None):
+    recent_logs = db_service.get_logs_by_date_range(db, user_id, start_date, end_date)
+    recent_food_entries = db_service.get_food_entries_by_date_range(db, user_id, start_date, end_date)
+
+    return {
+        "user_profile": user_profile.to_dict() if user_profile else None,
+        "goal": current_goal.to_dict() if current_goal else None,
+        "recent_logs": [log.to_dict() for log in recent_logs if log is not None],
+        "recent_food_entries": [food.to_dict() for food in recent_food_entries if food is not None],
+    }
+
+
+
+async def stream_response_generator(user_input: str, session_id: str, history_tuples: List[Tuple[str,str]], user_context: Optional[dict] = None):
     """Runs the assistant and streams the response sentence by sentence or chunk by chunk."""
     # This is a simplified streaming example. 
     # True streaming from LangGraph requires more complex handling of intermediate steps 
@@ -44,11 +71,12 @@ async def stream_response_generator(user_input: str, session_id: str, history_tu
     # A more advanced version would involve `ainvoke` on the graph and processing an AsyncIterator.
 
     try:
-        if current_goal:
-            # Goal-oriented mode
-            full_response = run_assistant(user_input, chat_history=history_tuples, current_goal=current_goal)
+        if user_context:
+            # Context-aware mode
+            full_response = run_assistant(user_input, chat_history=history_tuples)
+            # , user_context=user_context
         else:
-            # Q&A mode
+            # Q&A mode (or generic if user not logged in)
             full_response = run_qa_assistant(user_input, chat_history=history_tuples)
 
         # Simulate streaming by splitting the response (e.g., by sentences or newlines)
@@ -74,24 +102,9 @@ async def stream_response_generator(user_input: str, session_id: str, history_tu
         yield "data: [DONE]\n\n" # Signal stream completion
 
 @router.post("/chat/stream", tags=["Chat"])
-async def stream_chat_endpoint(payload: ChatMessageInput, request: Request, db: Session = Depends(get_db)):
+async def stream_chat_endpoint(payload: ChatMessageInput, db: Session = Depends(get_db)):
+    # , user_context: dict = Depends(get_user_context)
     """Receives a user message, processes it with the AI assistant, and streams the response."""
-    session_id = payload.session_id or "default_session"
-    
-    # Retrieve history for the session or use provided history
-    current_history_tuples = chat_histories.get(session_id, [])
-    if payload.chat_history: # If client sends history, it might override server's or be used if server has none
-        # Decide on a strategy: merge, prefer client, prefer server
-        # For simplicity, let's use client's if provided, else server's
-        current_history_tuples = payload.chat_history 
-        chat_histories[session_id] = current_history_tuples # Update server's knowledge
-
-    current_goal = get_current_goal(request, db)
-
-    return StreamingResponse(
-        stream_response_generator(payload.message, session_id, current_history_tuples, current_goal),
-        media_type="text/event-stream"
-    ),"""Receives a user message, processes it with the AI assistant, and streams the response."""
     session_id = payload.session_id or "default_session"
     
     # Retrieve history for the session or use provided history
@@ -104,12 +117,14 @@ async def stream_chat_endpoint(payload: ChatMessageInput, request: Request, db: 
 
     return StreamingResponse(
         stream_response_generator(payload.message, session_id, current_history_tuples),
-        media_type="text/event-stream"
-    )
+        # , user_context
+        media_type="text/event-stream")
+
 
 @router.post("/chat", response_model=ChatMessageOutput, tags=["Chat"])
-async def chat_endpoint(payload: ChatMessageInput, request: Request, db: Session = Depends(get_db)) -> ChatMessageOutput:
+async def chat_endpoint(payload: ChatMessageInput, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)) -> ChatMessageOutput:
     """Receives a user message, processes it with the AI assistant, and returns a response."""
+    user_input = payload.message
     session_id = payload.session_id
     
     # Retrieve history for the session or use provided history
@@ -118,28 +133,40 @@ async def chat_endpoint(payload: ChatMessageInput, request: Request, db: Session
         current_history_tuples = payload.chat_history
         chat_histories[session_id] = current_history_tuples
 
-    current_goal = get_current_goal(request, db)
-
-    try:
-        # Run the synchronous run_assistant in a separate thread to avoid blocking the event loop
-        if current_goal:
-            response_text = await asyncio.to_thread(run_assistant, payload.message, chat_history=current_history_tuples, current_goal=current_goal)
-        else:
-            response_text = await asyncio.to_thread(run_qa_assistant, payload.message, chat_history=current_history_tuples)
-        
-        # Update chat history
+    if not current_user:
+        if contains_health_keywords(user_input):
+            return ChatMessageOutput(response="To get personalized health advice, please login and set a goal using the 'Set Goal' button.", session_id=session_id, updated_chat_history=current_history_tuples)
+        response_text = await asyncio.to_thread(run_qa_assistant, user_input, chat_history=current_history_tuples)
         if session_id not in chat_histories:
             chat_histories[session_id] = []
-        chat_histories[session_id].append((payload.message, response_text))
-        
-        return ChatMessageOutput(
-            response=response_text,
-            session_id=session_id,
-            updated_chat_history=chat_histories[session_id]
-        )
-    except Exception as e:
-        print(f"Error in chat endpoint: {e}")
-        raise HTTPException(status_code=500, detail=f"Error processing your request: {str(e)}")
+        chat_histories[session_id].append((user_input, response_text))
+        return ChatMessageOutput(response=response_text, session_id=session_id, updated_chat_history=chat_histories[session_id])
+
+    goal = db_service.get_goal_by_user_id(db, current_user.id)
+    if not goal:
+        if contains_health_keywords(user_input):
+            return ChatMessageOutput(response="Welcome! It looks like you haven't set a health goal yet. Please set one to get personalized advice.", session_id=session_id, updated_chat_history=current_history_tuples)
+        response_text = await asyncio.to_thread(run_qa_assistant, user_input, chat_history=current_history_tuples)
+        if session_id not in chat_histories:
+            chat_histories[session_id] = []
+        chat_histories[session_id].append((user_input, response_text))
+        return ChatMessageOutput(response=response_text, session_id=session_id, updated_chat_history=chat_histories[session_id])
+
+    # If goal is set, proceed with assistant
+    user_context = await asyncio.to_thread(get_user_context, db, current_user)
+    response_text = await asyncio.to_thread(run_assistant, user_input, chat_history=current_history_tuples)
+
+    # Update chat history
+    if session_id not in chat_histories:
+        chat_histories[session_id] = []
+    chat_histories[session_id].append((user_input, response_text))
+
+    return ChatMessageOutput(
+        response=response_text,
+        session_id=session_id,
+        updated_chat_history=chat_histories[session_id]
+    )
+
 
 @router.get("/chat/history/{session_id}", tags=["Chat"])
 def get_chat_history(session_id: str) -> List[Tuple[str, str]]:

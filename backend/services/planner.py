@@ -16,13 +16,10 @@ class AgentState(TypedDict):
     agent_outcome: Optional[Union[AgentAction, AgentFinish, List[AgentAction]]] # Intermediate step for tool use
     intermediate_steps: Annotated[List[tuple[AgentAction, str]], operator.add] # Tool execution results
     
-    # Fields for goal detection and clarification
-    user_goal: Optional[Literal['lose_weight', 'gain_weight', 'stay_healthy', 'unknown']] # Detected user goal
+    # Fields for contextual information
+    user_context: Optional[dict] # Comprehensive user context including profile, goal, and recent logs
     clarification_needed: bool # Flag if clarification is required
     clarification_questions_asked: int # Counter for clarification attempts
-    
-    # Fields for contextual information (optional, for log awareness)
-    user_logs_summary: Optional[str] # Summary of user's recent logs
 
 # --- Pydantic Models for LLM Structured Output --- #
 class GoalIdentification(BaseModel):
@@ -48,11 +45,22 @@ def analyze_goal_node(state: AgentState):
     print("--- ANALYZING GOAL ---")
     structured_llm_goal = llm.with_structured_output(GoalIdentification)
     
+    # Extract goal from user_context if available
+    current_user_goal = state['user_context'].get('goal', {}).get('goal_description') if state.get('user_context') else None
+    if current_user_goal:
+        # If a goal is already set, we might not need to re-analyze it from scratch
+        # For now, we'll still pass it to the LLM for context, but the LLM should prioritize the existing goal.
+        goal_context_prompt = f"The user currently has a goal set: '{current_user_goal}'. Consider this in your analysis."
+    else:
+        goal_context_prompt = ""
+
     prompt = f"""
-    You are an AI assistant helping a user with their health and nutrition goals. 
+    You are an AI assistant helping a user with their health and nutrition goals.
     Analyze the following user input and conversation history to determine their main goal and if clarification is needed.
     User goals can be: 'lose_weight', 'gain_weight', 'stay_healthy'. If the goal is not clear, set it to 'unknown'.
     
+    {goal_context_prompt}
+
     Consider if the input is ambiguous or incomplete. For example, if the user says 'I want to be healthier' without specifics, clarification is needed.
     If clarification is needed, you will later ask questions like:
     - "What is your specific health goal (e.g., lose weight, gain muscle, improve energy)?"
@@ -72,8 +80,15 @@ def analyze_goal_node(state: AgentState):
     
     print(f"Goal Analysis Result: {goal_analysis}")
     
+    # Update user_context with the identified goal if it's new or more specific
+    updated_user_context = state.get('user_context', {})
+    if goal_analysis.goal != 'unknown' and (not updated_user_context.get('goal') or updated_user_context['goal'].get('goal_description') != goal_analysis.goal):
+        # This part needs careful consideration: how to update the 'goal' within user_context
+        # For now, let's just pass the identified goal as a separate field for the agent to use.
+        # A more robust solution would involve updating the DB goal directly or having a 'proposed_goal' field.
+        pass # We will rely on the agent to use this information
+
     return {
-        "user_goal": goal_analysis.goal,
         "clarification_needed": goal_analysis.requires_clarification,
         "clarification_questions_asked": state.get("clarification_questions_asked", 0) # Initialize if not present
     }
@@ -104,27 +119,39 @@ def planning_node(state: AgentState):
     print("--- PLANNING: DECIDING ON TOOL USE ---")
     structured_llm_plan = llm.with_structured_output(PlanDecision)
     
-    # Optional: Incorporate user log summary if available
-    log_context = ""
-    if state.get("user_logs_summary"):
-        log_context = f"\nUser's Recent Log Summary:\n{state['user_logs_summary']}"
+    user_profile = state['user_context'].get('user_profile', {})
+    user_goal = state['user_context'].get('goal', {})
+    recent_logs = state['user_context'].get('recent_logs', [])
+    recent_food_entries = state['user_context'].get('recent_food_entries', [])
+
+    # Summarize relevant user context for the LLM
+    context_summary = ""
+    if user_profile:
+        context_summary += f"User: {user_profile.get('name', 'N/A')}, Email: {user_profile.get('email', 'N/A')}.\n"
+    if user_goal:
+        context_summary += f"Current Goal: {user_goal.get('goal_description', 'N/A')}. Analysis: {user_goal.get('analysis_result', 'N/A')}.\n"
+    if recent_logs:
+        context_summary += f"Recent Logs (last {len(recent_logs)} entries): {recent_logs}.\n"
+    if recent_food_entries:
+        context_summary += f"Recent Food Entries (last {len(recent_food_entries)} entries): {recent_food_entries}.\n"
 
     prompt = f"""
-    You are an AI health assistant. The user's goal is now considered clear: '{state['user_goal']}'.
+    You are an AI health assistant. You have the following user context:
+    {context_summary}
+
     Conversation History:
     {state['chat_history']}
     User Input: {state['input']}
-    {log_context}
 
     Available tools: {[tool.name for tool in all_tools]}
     Tool descriptions:
     {[f'{tool.name}: {tool.description}' for tool in all_tools]}
 
-    Based on the user's input, their stated goal ('{state['user_goal']}'), and conversation history, decide if you need to use any tools to formulate a comprehensive plan or answer. 
+    Based on the user's input, their current context (goal, logs, etc.), and conversation history, decide if you need to use any tools to formulate a comprehensive plan or answer.
     For example:
-    - If goal is 'lose_weight', you might need BMI, BMR, and calorie_estimator.
-    - If goal is 'gain_weight', similar tools might be needed.
-    - If goal is 'stay_healthy' and input is general, a direct response might suffice unless specific metrics are asked for.
+    - If the user asks about their BMI and you have their weight/height in context, you might use a BMI calculation tool.
+    - If the user asks for calorie estimation based on their goal, you might use a BMR/calorie estimator tool.
+    - If the user asks for a summary of their recent activity, you might use tools to process their logs.
     - If the user asks for external information (e.g., 'What are the benefits of Omega-3?'), consider the search tool if available.
     
     Respond with whether tools are needed.
@@ -134,18 +161,10 @@ def planning_node(state: AgentState):
     print(f"Planning Decision: {plan_decision}")
 
     if plan_decision.should_use_tools:
-        # If tools are needed, the agent_node will be called next to select them
-        # We don't return agent_outcome here, agent_node will create it.
         print("Decision: Use tools.")
         return {}
     else:
-        # No tools needed, proceed to generate a direct response
         print("Decision: Respond directly.")
-        # This will be handled by the 'generate_response_node' if no tools are chosen by agent_node
-        # or if planning_node decides no tools are needed.
-        # To directly go to response node, we can simulate an AgentFinish without tool usage.
-        # However, the standard flow is to let agent_node make the final call or generate response.
-        # For simplicity here, if planning says no tools, we'll let agent_node confirm that.
         return {}
 
 # 4. Agent Node (LangChain's ReAct-like logic for tool invocation or direct response)
@@ -153,17 +172,29 @@ def agent_node(state: AgentState):
     """Invokes the LLM to use tools or generate a response. This is the main ReAct-style agent logic."""
     print("--- AGENT: EXECUTING/RESPONDING ---")
     
-    # Optional: Incorporate user log summary if available
-    log_context = ""
-    if state.get("user_logs_summary"):
-        log_context = f"\nUser's Recent Log Summary:\n{state['user_logs_summary']}"
+    user_profile = state['user_context'].get('user_profile', {})
+    user_goal = state['user_context'].get('goal', {})
+    recent_logs = state['user_context'].get('recent_logs', [])
+    recent_food_entries = state['user_context'].get('recent_food_entries', [])
+
+    # Summarize relevant user context for the LLM
+    context_summary = ""
+    if user_profile:
+        context_summary += f"User: {user_profile.get('name', 'N/A')}, Email: {user_profile.get('email', 'N/A')}.\n"
+    if user_goal:
+        context_summary += f"Current Goal: {user_goal.get('goal_description', 'N/A')}. Analysis: {user_goal.get('analysis_result', 'N/A')}.\n"
+    if recent_logs:
+        context_summary += f"Recent Logs (last {len(recent_logs)} entries): {recent_logs}.\n"
+    if recent_food_entries:
+        context_summary += f"Recent Food Entries (last {len(recent_food_entries)} entries): {recent_food_entries}.\n"
 
     # Construct messages for the LLM, including history and current input
     # The system prompt guides the LLM on how to behave based on the current state (goal, tools needed etc.)
     system_prompt = f"""You are an AI Health and Nutrition Assistant.
-    Your current task is to respond to the user based on their input and identified goal: '{state['user_goal']}'.
+    Your current task is to respond to the user based on their input and the provided user context.
+    User Context:
+    {context_summary}
     Conversation History is provided.
-    {log_context}
     
     You have access to the following tools:
     {[f'{tool.name}: {tool.description}' for tool in all_tools]}
@@ -171,12 +202,12 @@ def agent_node(state: AgentState):
     Follow these instructions:
     1. If the user's query can be answered directly or a plan can be provided without specific calculations yet, respond directly.
     2. If you need to calculate BMI, BMR, estimate calories, or summarize logs, invoke the necessary tools.
-    3. If the user asks for external information (e.g., 'What are benefits of Omega-3?'), use the 'tavily_search_results_json' tool if available and appropriate.
+    3. If the user asks for external information (e.g., 'What are the benefits of Omega-3?'), use the 'tavily_search_results_json' tool if available and appropriate.
     4. Formulate a thoughtful, empathetic, and actionable response.
     5. If providing a plan (e.g., for weight loss), explain the components (e.g., calorie target, meal suggestions, exercise types).
     
-    Based on the user's goal of '{state['user_goal']}', their input '{state['input']}', and the conversation history, decide whether to call a tool or respond directly. 
-    If you are calling a tool, ensure you have all necessary parameters from the conversation or ask if missing. 
+    Based on the user's input, their current context, and the conversation history, decide whether to call a tool or respond directly.
+    If you are calling a tool, ensure you have all necessary parameters from the conversation or ask if missing.
     If responding directly, provide a comprehensive answer or plan.
     """
     

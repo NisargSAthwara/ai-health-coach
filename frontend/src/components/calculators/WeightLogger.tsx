@@ -14,11 +14,7 @@ interface WeightLoggerProps {
 
 const WeightLogger: React.FC<WeightLoggerProps> = ({ onBack }) => {
   const [weight, setWeight] = useState('');
-  const [entries, setEntries] = useState<WeightEntry[]>([
-    { id: '1', weight: 70.5, date: '2024-01-15' },
-    { id: '2', weight: 70.2, date: '2024-01-20' },
-    { id: '3', weight: 69.8, date: '2024-01-25' }
-  ]);
+  const [entries, setEntries] = useState<WeightEntry[]>([]);
 
   const addEntry = () => {
     if (weight && parseFloat(weight) > 0) {
